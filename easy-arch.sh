@@ -484,6 +484,91 @@ for service in "${services[@]}"; do
     systemctl enable "$service" --root=/mnt &>/dev/null
 done
 
+##########
+# Install KDE Plasma and Wayland
+echo "Installing KDE Plasma and Wayland..."
+pacman -S --noconfirm plasma plasma-wayland-session kde-applications sddm
+
+# Enable SDDM display manager
+systemctl enable sddm
+
+# Install NVIDIA drivers
+echo "Installing NVIDIA drivers..."
+pacman -S --noconfirm nvidia nvidia-utils nvidia-settings
+
+# Configure mkinitcpio.conf for NVIDIA
+sed -i 's/MODULES=()/MODULES=(nvidia nvidia_modeset nvidia_uvm nvidia_drm)/' /etc/mkinitcpio.conf
+
+# Regenerate initramfs
+mkinitcpio -P
+
+# Set the kernel parameter for NVIDIA DRM KMS
+echo "Setting kernel parameter for NVIDIA DRM KMS..."
+grub_file="/etc/default/grub"
+if grep -q "GRUB_CMDLINE_LINUX_DEFAULT" $grub_file; then
+    sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT="\(.*\)"/GRUB_CMDLINE_LINUX_DEFAULT="\1 nvidia-drm.modeset=1"/' $grub_file
+else
+    echo 'GRUB_CMDLINE_LINUX_DEFAULT="nvidia-drm.modeset=1"' >> $grub_file
+fi
+
+# Update GRUB configuration
+grub-mkconfig -o /boot/grub/grub.cfg
+
+# Create configuration file for NVIDIA DRM
+echo "Creating configuration file for NVIDIA DRM..."
+mkdir -p /etc/modprobe.d
+cat <<EOF > /etc/modprobe.d/nvidia-drm.conf
+options nvidia-drm modeset=1
+EOF
+
+# Configure the Xorg server
+echo "Configuring Xorg server for NVIDIA..."
+cat <<EOF > /etc/X11/xorg.conf.d/20-nvidia.conf
+Section "Device"
+    Identifier "NVIDIA Card"
+    Driver "nvidia"
+    Option "Coolbits" "28"
+    Option "TripleBuffer" "true"
+EndSection
+EOF
+
+# Set up KDE to use Wayland by default
+echo "Setting KDE to use Wayland by default..."
+cat <<EOF > /etc/sddm.conf
+[General]
+InputMethod=
+
+[Autologin]
+Relogin=false
+
+[Theme]
+Current=breeze
+
+[Users]
+DefaultPath=/usr/local/sbin:/usr/local/bin:/usr/bin
+HideShells=
+HideUsers=
+RememberLastSession=true
+RememberLastUser=true
+
+[X11]
+DisplayCommand=/usr/share/sddm/scripts/Xsetup
+DisplayStopCommand=/usr/share/sddm/scripts/Xstop
+SessionCommand=/usr/share/sddm/scripts/Xsession
+SessionDir=/usr/share/xsessions
+SessionLogFile=.xsession-errors
+
+[Wayland]
+SessionDir=/usr/share/wayland-sessions
+SessionCommand=/usr/share/sddm/scripts/wayland-session
+EOF
+
+# Final messages
+echo "Installation and configuration of KDE Wayland and NVIDIA drivers complete."
+echo "Please reboot the system to apply all changes."
+
+########
+
 # Finishing up.
 info_print "Done, you may now wish to reboot (further changes can be done by chrooting into /mnt)."
 exit
